@@ -1,0 +1,1 @@
+Bot do discord para criação e organização de torneios.
