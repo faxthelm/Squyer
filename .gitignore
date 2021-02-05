@@ -1,4 +1,5 @@
 /shelf/
+.idea
 /workspace.xml
 venv/
 .iws
