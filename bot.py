@@ -42,7 +42,6 @@ async def create_tournament_listener(ctx, *args):
     message = await ctx.send(embed=embed)
     await message.add_reaction("\U0001F1FE")
     await message.add_reaction("\U0001F1F3")
-    await ctx.message.delete()
 
 
 @bot.event
