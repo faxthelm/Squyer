@@ -56,14 +56,14 @@ async def on_raw_reaction_remove(payload):
 
 
 @bot.command(name="cancelar", help="Cancela o torneio (somente o criador do torneio)")
-async def close_tournament(ctx, *args):
+async def cancel_tournament(ctx, *args):
     if ctx.message.channel != CHANNEL_NAME:
         return
     # await ctx.send(response)
 
 
 @bot.command(name="iniciar", help="Inicia o torneio (somente o criador do torneio)")
-async def close_tournament(ctx, *args):
+async def start_tournament(ctx, *args):
     if ctx.message.channel != CHANNEL_NAME:
         return
 
