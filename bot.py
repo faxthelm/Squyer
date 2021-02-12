@@ -89,9 +89,9 @@ async def create_tournament(ctx, args):
             raise TypeException.TournamentTypeException()
         return args[0].upper(), args[1]
     else:
-        first_response = await ask_question(ctx, FIRST_QUESTION)
+        first_response = await ask_question(ctx.channel, ctx.author.id, FIRST_QUESTION)
         check_tournament_type(first_response)
-        second_response = await ask_question(ctx, SECOND_QUESTION)
+        second_response = await ask_question(ctx.channel, ctx.author.id, SECOND_QUESTION)
         try:
             if int(second_response) not in NUMBER_OF_PLAYERS:
                 raise NumberOfPlayersException.TournamentNumberOfPlayersException()
@@ -100,11 +100,11 @@ async def create_tournament(ctx, args):
         return first_response.upper(), second_response
 
 
-async def ask_question(ctx, question_text):
+async def ask_question(channel, member_id, question_text):
     response = None
-    question = await ctx.send(question_text)
+    question = await channel.send(question_text)
     try:
-        response = await bot.wait_for('message', check=lambda message: message.author == ctx.author, timeout=10.0)
+        response = await bot.wait_for('message', check=lambda message: message.author.id == member_id, timeout=10.0)
     except asyncio.TimeoutError:
         await question.delete()
         raise TimeoutException.CommandTimeoutException()
