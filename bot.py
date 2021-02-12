@@ -1,6 +1,7 @@
 import asyncio
 import os
 import discord
+from discord import Embed
 from discord.ext import commands
 
 from exceptions import CommandTimeoutException as TimeoutException, TournamentTypeException as TypeException, \
@@ -9,10 +10,14 @@ from exceptions import CommandTimeoutException as TimeoutException, TournamentTy
 intents = discord.Intents(messages=True, guilds=True, reactions=True)
 
 # Remember to create herokuenv
+BOT_ID = 801287710316298261
 TOKEN = os.environ['DISCORD_TOKEN']
 CHANNEL_NAME = "torneio"
+REACTIONS = {"YES": '🇾', "NO": '🇳'}
 FIRST_QUESTION = "Qual tipo de torneio você deseja fazer?\n""Premium ou Principal?"
 SECOND_QUESTION = "Qual o numero de participantes? (2,4,8,16,32)"
+CHAR_QUESTION = "Digite o nome da classe que você irá utilizar para confirmar sua inscrição, "
+EMPTY_DESCRIPTION = "```\n```"
 NUMBER_OF_PLAYERS = {2, 4, 8, 16, 32}
 
 bot = commands.Bot(command_prefix='!', intents=intents)
@@ -46,7 +51,29 @@ async def create_tournament_listener(ctx, *args):
 
 @bot.event
 async def on_raw_reaction_add(payload):
-    print("TODO")
+    channel_id = payload.channel_id
+    member = payload.member
+    channels = member.guild.channels
+    channel = None
+    # Get the channel object from the channels list, without having to request it.
+    for ch in channels:
+        if ch.id == channel_id:
+            channel = ch
+            break
+    # If this reaction wasn't on the tournament channel, don't list to it.
+    if channel.name != CHANNEL_NAME:
+        return
+    message = await channel.fetch_message(payload.message_id)
+    try:
+        internal_response = await on_reaction_add_logic(payload, message)
+        # TODO: save our change to the MongoDB
+    except TimeoutException.CommandTimeoutException as cte:
+        await channel.send(cte.args[0], delete_after=10.0)
+        raise
+    finally:
+        # Only remove reactions by users other than bots
+        if not payload.member.bot:
+            await message.remove_reaction(payload.emoji, payload.member)
 
 
 @bot.event
@@ -126,8 +153,88 @@ def check_tournament_type(tournament_type_check):
 
 
 def create_tournament_document(creator_id, tournament_type, number_of_players):
-    print("creating tournament for " + str(creator_id) + " with type: " + tournament_type + ", number_of_players: " + str(number_of_players))
+    print(
+        "creating tournament for " + str(creator_id) + " with type: " + tournament_type + ", number_of_players: " + str(
+            number_of_players))
     # create a try/retry in case of errors
+
+
+async def on_reaction_add_logic(payload, message):
+    print("Reação adicionada")
+    member = payload.member
+    # Only act upon these reactions
+    if payload.emoji.name != REACTIONS.get("YES") and payload.emoji.name != REACTIONS.get("NO"):
+        return
+    # We won't act to bots reactions
+    if member.bot:
+        return
+    # We will only act on reactions from messages sent by our bot that contain embed
+    if message.author.id != BOT_ID and len(message.embeds) == 0:
+        return
+    embed_dict = message.embeds[0].to_dict()
+    if "description" not in embed_dict:
+        embed_dict["description"] = EMPTY_DESCRIPTION
+    if payload.emoji.name == REACTIONS.get("YES"):
+        char = await ask_question(message.channel, payload.user_id, CHAR_QUESTION + member.display_name)
+        embed_dict["description"] = update_participants("add", payload.member, char, embed_dict["description"])
+    elif payload.emoji.name == REACTIONS.get("NO"):
+        embed_dict["description"] = update_participants("remove", payload.member, None, embed_dict["description"])
+    else:
+        return
+
+    new_embed = Embed.from_dict(embed_dict)
+    await message.edit(embed=new_embed)
+
+
+def update_participants(action, member, char, description):
+    if action == "add":
+        if member.display_name in description:
+            # If the member is already in the list, don't add him again, just return the same list
+            return description
+        else:
+            list_members = description_to_list(description)
+            list_members.append({"char": char, "name": member.display_name})
+            return format_description(list_members)
+    else:
+        if member.display_name not in description:
+            # If the member is not in the list, just return the same list
+            return description
+        list_members = description_to_list(description)
+        # If someone presses the N while there are no members in the list
+        if len(list_members) == 0:
+            return description
+
+        for item in list_members:
+            if item["name"] == member.display_name:
+                list_members.remove(item)
+                break
+        return format_description(list_members)
+
+
+def description_to_list(description):
+    list = []
+    if description == EMPTY_DESCRIPTION:
+        return list
+    list_members = description.split("\n")
+    # Removing the Quotes that create the code box in discord
+    list_members.pop(0)
+    list_members.pop()
+    for member in list_members:
+        list.append({"char": member[0:13].strip(), "name": member[15:].strip()})
+
+    return sorted(list, key=lambda k: k["name"])
+
+
+def format_description(list):
+    response = ""
+    if len(list) == 0:
+        return response
+    sorted_list = sorted(list, key=lambda k: k["name"])
+    for member in sorted_list:
+        response += "{} | {}\n".format(member["char"][0:13].center(13, " "), member["name"][0:41])
+    if response != "":
+        response = "```\n" + response + "```"
+    return response
 
 
 bot.run(TOKEN)
