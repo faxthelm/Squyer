@@ -65,7 +65,7 @@ async def on_raw_reaction_add(payload):
         return
     message = await channel.fetch_message(payload.message_id)
     try:
-        internal_response = await on_reaction_add_logic(payload, message)
+        internal_response = await on_reaction_add_logic(payload, message, channel)
         # TODO: save our change to the MongoDB
     except TimeoutException.CommandTimeoutException as cte:
         await channel.send(cte.args[0], delete_after=10.0)
@@ -159,7 +159,7 @@ def create_tournament_document(creator_id, tournament_type, number_of_players):
     # create a try/retry in case of errors
 
 
-async def on_reaction_add_logic(payload, message):
+async def on_reaction_add_logic(payload, message, channel):
     print("Reação adicionada")
     member = payload.member
     # Only act upon these reactions
@@ -175,40 +175,44 @@ async def on_reaction_add_logic(payload, message):
     if "description" not in embed_dict:
         embed_dict["description"] = EMPTY_DESCRIPTION
     if payload.emoji.name == REACTIONS.get("YES"):
+        # We don't want anyone entering the tournament if there are no slots
+        if int(embed_dict["fields"][1]["value"]) <= 0:
+            return
         char = await ask_question(message.channel, payload.user_id, CHAR_QUESTION + member.display_name)
-        embed_dict["description"] = update_participants("add", payload.member, char, embed_dict["description"])
+        embed_dict = update_participants("add", payload.member, char, embed_dict)
     elif payload.emoji.name == REACTIONS.get("NO"):
-        embed_dict["description"] = update_participants("remove", payload.member, None, embed_dict["description"])
+        embed_dict = update_participants("remove", payload.member, None, embed_dict)
     else:
         return
 
-    new_embed = Embed.from_dict(embed_dict)
-    await message.edit(embed=new_embed)
+    # Retrive the message once more to check if we can actually fit this member into the list
+    message_recheck = await channel.fetch_message(payload.message_id)
+    if int(message_recheck.embeds[0].to_dict()["fields"][1]["value"]) > 0 or payload.emoji.name == REACTIONS.get("NO"):
+        new_embed = Embed.from_dict(embed_dict)
+        await message.edit(embed=new_embed)
 
 
-def update_participants(action, member, char, description):
+def update_participants(action, member, char, embed_dict):
+    description = embed_dict["description"]
     if action == "add":
-        if member.display_name in description:
-            # If the member is already in the list, don't add him again, just return the same list
-            return description
-        else:
+        if member.display_name not in description:
             list_members = description_to_list(description)
             list_members.append({"char": char, "name": member.display_name})
-            return format_description(list_members)
-    else:
-        if member.display_name not in description:
-            # If the member is not in the list, just return the same list
-            return description
-        list_members = description_to_list(description)
-        # If someone presses the N while there are no members in the list
-        if len(list_members) == 0:
-            return description
-
-        for item in list_members:
-            if item["name"] == member.display_name:
-                list_members.remove(item)
-                break
-        return format_description(list_members)
+            embed_dict["fields"][1]["value"] = str(int(embed_dict["fields"][1]["value"]) - 1)
+            embed_dict["description"] = format_description(list_members)
+    elif action == "remove":
+        if member.display_name in description:
+            list_members = description_to_list(description)
+            # If someone presses the N while there are no members in the list
+            if len(list_members) == 0:
+                return description
+            for item in list_members:
+                if item["name"] == member.display_name:
+                    list_members.remove(item)
+                    break
+            embed_dict["description"] = format_description(list_members)
+            embed_dict["fields"][1]["value"] = str(int(embed_dict["fields"][1]["value"]) + 1)
+    return embed_dict
 
 
 def description_to_list(description):
